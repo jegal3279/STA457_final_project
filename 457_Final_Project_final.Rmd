@@ -1,0 +1,1053 @@
+---
+title: "457finalproject"
+output: html_document
+---
+
+```{r}
+library(dplyr)
+
+G <- read.csv("Ghana_data.csv", header = TRUE, sep = ',', stringsAsFactors = FALSE)
+C <- read.csv("Daily Prices_ICCO.csv", header = TRUE, sep = ',', stringsAsFactors = FALSE)
+# plot(C, type= "l", ylab = "ICCO.daily.price..US..tonne.", xlab ="Date")
+C$Date <- as.Date(C$Date, format = "%d/%m/%Y")  # Assuming day/month/year format
+
+# First rename the column to something easier (optional but cleaner)
+colnames(C)[colnames(C) == "ICCO.daily.price..US..tonne."] <- "Price"
+
+# Remove commas and convert to numeric
+C$Price <- gsub(",", "", C$Price)   # Remove commas
+C$Price <- as.numeric(C$Price)      # Convert to numeric
+
+# Verify it's numeric now
+summary(C$Price)
+
+C$Date <- as.Date(C$Date, format="%d/%m/%Y")
+
+# Confirm structure
+str(C$Date)
+summary(C$Date)
+```
+```{r}
+# Rename column DATE to Date
+G1 <- G %>%
+  rename(Date = DATE)
+
+
+# Convert both Date columns to Date class
+C$Date <- as.Date(C$Date, format="%d/%m/%Y")   # C: day/month/year
+G1$Date <- as.Date(G1$Date, format="%Y-%m-%d")   # G: year-month-day
+
+# Confirm they are both Date objects
+class(C$Date)  # Should return "Date"
+class(G1$Date)  # Should return "Date"
+
+# If you need them *displayed* in a consistent format
+C$Date_formatted <- format(C$Date, "%Y-%m-%d")
+G1$Date_formatted <- format(G1$Date, "%Y-%m-%d")
+
+# View the output
+head(C$Date_formatted)
+head(G1$Date_formatted)
+
+```
+```{r}
+# Define the common date range
+start_date <- as.Date("1994-10-03")
+end_date   <- as.Date("2024-11-28")
+
+# Filter Dataset C to this range
+C_filtered <- subset(C, Date >= start_date & Date <= end_date)
+
+# Filter Dataset G to this range
+G_filtered <- subset(G1,  Date >= start_date & Date <= end_date)
+
+# Check the ranges after filtering
+range(C_filtered$Date)
+range(G_filtered$Date)
+
+
+# Merge datasets by Date
+merged_df <- left_join(C_filtered, G_filtered, by="Date")
+
+# Check the merged data
+head(merged_df)
+tail(merged_df)
+nrow(merged_df)
+```
+
+```{r}
+# install.packages("tidyr")
+
+library(tidyr)
+library(dplyr)
+
+merged_df_filled <- merged_df %>% 
+  fill(PRCP, TMAX, TMIN, .direction = "down")
+
+merged_df_filled_1 <- na.omit(merged_df_filled)
+head(merged_df_filled_1)
+```
+```{r}
+# Assuming your dataset is merged_df_filled_1
+daily_avg_df <- merged_df_filled_1 %>%
+  group_by(Date) %>%
+  summarise(
+    avg_Price = mean(Price, na.rm = TRUE),
+    avg_PRCP = mean(PRCP, na.rm = TRUE),
+    avg_TAVG = mean(TAVG, na.rm = TRUE),
+    avg_TMAX = mean(TMAX, na.rm = TRUE),
+    avg_TMIN = mean(TMIN, na.rm = TRUE)
+  ) %>%
+  ungroup()
+```
+
+#Exploratory data analysis
+```{r}
+library(ggplot2)
+library(forecast)
+
+# Trajectory plot of average price over time
+ggplot(daily_avg_df, aes(x = Date, y = avg_Price)) +
+  geom_line(color = "steelblue") +
+  labs(
+    title = "Trajectory Plot of Average Price over Time",
+    x = "Date",
+    y = "Average Price"
+  ) +
+  theme_minimal()
+
+# plot acf and pacf
+# Convert avg_Price to a time series object (optional but good practice)
+price_ts <- ts(daily_avg_df$avg_Price)
+
+# Plot ACF
+acf(price_ts, main = "ACF of Average Price")
+
+# Plot PACF
+pacf(price_ts, main = "PACF of Average Price")
+
+# qq-plot
+qqnorm(daily_avg_df$avg_Price,
+       main = "Q-Q Plot of Average Price")
+qqline(daily_avg_df$avg_Price, col = "red")
+
+# Differencing
+# First difference
+d_price <- diff(daily_avg_df$avg_Price)
+
+# Plot first difference
+plot(d_price, type = "l", main = "First Difference of Average Price", ylab = "Difference", xlab = "Time")
+
+# ACF of first difference
+acf(d_price, main = "ACF of First Difference of Average Price")
+
+# PACF of first difference
+pacf(d_price, main = "PACF of First Difference of Average Price")
+
+# Second difference
+dd_price <- diff(d_price)
+
+# Plot second difference
+plot(dd_price, type = "l", main = "Second Difference of Average Price", ylab = "2nd Difference", xlab = "Time")
+acf(dd_price, main = "ACF of Second Difference of Average Price")
+pacf(dd_price, main = "PACF of Second Difference of Average Price")
+```
+
+```{r}
+# Load libraries
+library(forecast)
+library(tseries)
+library(readr)
+library(lubridate)
+library(ggplot2)
+library(dplyr)
+library(astsa)
+
+# Assume daily_avg_df is your cleaned dataset with the following columns:
+# avg_Price, avg_PRCP, avg_TMAX, avg_TMIN
+# Log-transform the average price
+log_price <- log(daily_avg_df$avg_Price)
+
+# Create exogenous variable matrix from the relevant columns
+xreg_matrix <- as.matrix(daily_avg_df %>% select(avg_PRCP, avg_TAVG))
+
+# Optional: check stationarity with ADF test if needed
+#adf.test(log_price)
+
+# Plot ACF and PACF of the log series
+acf2(log_price, main="ACF/PACF of Log Price")
+
+# Use auto.arima with exogenous variables to select a good model
+#auto_model <- auto.arima(log_price)
+#print(auto_model)
+
+# Alternatively, manually fit an ARIMAX model; here we use order = (0,1,3) as an example.
+model_arimax_log1 <- arima(log_price, order = c(1, 1, 0), xreg = xreg_matrix)
+model_arimax_log2 <- arima(log_price, order = c(1, 1, 1), xreg = xreg_matrix)
+model_arimax_log3 <- arima(log_price, order = c(2, 1, 1), xreg = xreg_matrix)
+
+```
+Residual Analysis ARIMAX (1,1,0)
+```{r}
+
+# Plot residuals
+resid_model1 <- resid(model_arimax_log1)
+plot(resid_model1, main = "Residuals of ARIMAX(1,1,0) Model", ylab = "Residuals")
+
+
+#ACF of residuals
+acf2(resid_model1, main = "ACF/PACF of Residuals of ARIMAX(1,1,0)")
+
+# Extract coefficients
+estimates <- model_arimax_log1$coef
+
+# Extract standard errors (from the diagonal of the variance-covariance matrix)
+std_errors <- sqrt(diag(model_arimax_log1$var.coef))
+
+# Compute z-scores
+z_scores <- estimates / std_errors
+
+# Compute two-tailed p-values
+p_values <- 2 * (1 - pnorm(abs(z_scores)))
+
+# Combine results into a data frame
+pval_table <- data.frame(
+  Estimate = estimates,
+  Std_Error = std_errors,
+  Z_score = z_scores,
+  P_value = p_values
+)
+
+# View the table
+print(pval_table)
+
+# Standardize the residuals, and analyse the standardized residuals
+standardized_residuals1 <- resid(model_arimax_log1)/sqrt(model_arimax_log1$sigma2)
+qqnorm(standardized_residuals1,
+       main = "QQ plot of Standardized Residuals of ARIMAX(1,1,0)")
+qqline(standardized_residuals1)
+
+# Compute and plot Ljung-Box test p-values for lags 1 to 20
+max_log <- 20
+p_value <- numeric(max_log)
+for (lag in 1:max_log) {
+  p_value[lag] <- Box.test(standardized_residuals1, lag = lag, type = "Ljung-Box")$p.value
+}
+
+plot(1:max_log, p_value, type = "b",
+     xlab = "Lag", ylab = "p-value", 
+     main = "Ljung-Box Test p-values of Standardized Residuals of ARIMAX(1,1,0)",
+     ylim = c(0, 1))
+abline(h = 0.05, col = "blue", lty = 2)
+```
+
+Prediction ARIMAX (1,1,0)
+```{r}
+# Compute the in-sample fitted values (one-step-ahead forecasts)
+fitted_values1 <- fitted(model_arimax_log1)
+actual_values <- log_price
+# Plot the actual log series in black
+plot(log_price,
+     type = "l",
+     col = "black",
+     main = "Log Price vs. One-step Ahead Forecasts of ARIMAX(1,1,0)",
+     ylab = "Log of Series")
+
+# Overlay the fitted (one-step-ahead) forecasts in red
+lines(fitted_values1,
+      col = "red",
+      lty = 2)
+
+# Legend 
+legend("topleft",
+       legend = c("Actual log_price", "One-step Ahead Fitted"),
+       col = c("black", "red"),
+       lty = c(1, 2))
+
+# Calculate residuals
+residuals <- actual_values - fitted_values1
+
+# Compute RMSE
+RMSE <- sqrt(mean(residuals^2))
+print(paste("RMSE:", RMSE))
+
+# Compute pseudo-R^2:
+# SST is the total sum of squares: sum((actual - mean(actual))^2)
+SST <- sum((actual_values - mean(actual_values))^2)
+# SSE is the sum of squared errors: sum(residuals^2)
+SSE <- sum(residuals^2)
+R2 <- 1 - (SSE / SST)
+print(paste("Pseudo R^2:", R2))
+
+
+```
+Residual Analysis ARIMAX (1,1,1)
+```{r}
+
+# Plot residuals
+resid_model2 <- resid(model_arimax_log2)
+plot(resid_model2, main = "Residuals of ARIMAX (1,1,1)", ylab = "Residuals")
+
+
+#ACF of residuals
+acf2(resid_model2, main = "ACF/PACF of Residuals ARIMAX (1,1,1)")
+
+
+# Display AIC for the fitted ARIMAX model
+#aic_value <- AIC(model_arimax_log2)
+#print(paste("AIC:", aic_value))
+
+# Extract coefficients
+estimates <- model_arimax_log2$coef
+
+# Extract standard errors (from the diagonal of the variance-covariance matrix)
+std_errors <- sqrt(diag(model_arimax_log2$var.coef))
+
+# Compute z-scores
+z_scores <- estimates / std_errors
+
+# Compute two-tailed p-values
+p_values <- 2 * (1 - pnorm(abs(z_scores)))
+
+# Combine results into a data frame
+pval_table <- data.frame(
+  Estimate = estimates,
+  Std_Error = std_errors,
+  Z_score = z_scores,
+  P_value = p_values
+)
+
+# View the table
+print(pval_table)
+
+# Standardize the residuals, and analyse the standardized residuals
+standardized_residuals2 <- resid(model_arimax_log2)/sqrt(model_arimax_log2$sigma2)
+qqnorm(standardized_residuals2,
+       main = "QQ plot of Standardized Residuals of ARIMAX(1,1,1)")
+qqline(standardized_residuals2)
+
+# Compute and plot Ljung-Box test p-values for lags 1 to 20
+max_log <- 20
+p_value <- numeric(max_log)
+for (lag in 1:max_log) {
+  p_value[lag] <- Box.test(standardized_residuals2, lag = lag, type = "Ljung-Box")$p.value
+}
+
+plot(1:max_log, p_value, type = "b",
+     xlab = "Lag", ylab = "p-value", 
+     main = "Ljung-Box Test p-values of Standardized Residuals of ARIMAX (1,1,1)",
+     ylim = c(0, 1))
+abline(h = 0.05, col = "blue", lty = 2)
+```
+
+Prediction ARIMAX (1,1,1)
+```{r}
+# Compute the in-sample fitted values (one-step-ahead forecasts)
+fitted_values2 <- fitted(model_arimax_log2)
+# Plot the actual log series in black
+plot(log_price,
+     type = "l",
+     col = "black",
+     main = "Log Price vs. One-step Ahead Forecasts ARIMAX (1,1,1)",
+     ylab = "Log of Series")
+
+# Overlay the fitted (one-step-ahead) forecasts in red
+lines(fitted_values2,
+      col = "red",
+      lty = 2)
+
+# Legend 
+legend("topleft",
+       legend = c("Actual log_price", "One-step Ahead Fitted"),
+       col = c("black", "red"),
+       lty = c(1, 2))
+
+# Calculate residuals
+residuals <- actual_values - fitted_values2
+
+# Compute RMSE
+RMSE <- sqrt(mean(residuals^2))
+print(paste("RMSE:", RMSE))
+
+# Compute pseudo-R^2:
+# SST is the total sum of squares: sum((actual - mean(actual))^2)
+SST <- sum((actual_values - mean(actual_values))^2)
+# SSE is the sum of squared errors: sum(residuals^2)
+SSE <- sum(residuals^2)
+R2 <- 1 - (SSE / SST)
+print(paste("Pseudo R^2:", R2))
+
+```
+
+Residual Analysis ARIMAX (2,1,1)
+```{r}
+
+# Plot residuals
+resid_model3 <- resid(model_arimax_log3)
+plot(resid_model3, main = "Residuals of ARIMAX Model", ylab = "Residuals")
+
+
+#ACF of residuals
+acf2(resid_model3, main = "ACF/PACF of Residuals ARIMA (2,1,1)")
+
+
+# Display AIC for the fitted ARIMAX model
+#aic_value <- AIC(model_arimax_log2)
+#print(paste("AIC:", aic_value))
+
+# Extract coefficients
+estimates <- model_arimax_log3$coef
+
+# Extract standard errors (from the diagonal of the variance-covariance matrix)
+std_errors <- sqrt(diag(model_arimax_log3$var.coef))
+
+# Compute z-scores
+z_scores <- estimates / std_errors
+
+# Compute two-tailed p-values
+p_values <- 2 * (1 - pnorm(abs(z_scores)))
+
+# Combine results into a data frame
+pval_table <- data.frame(
+  Estimate = estimates,
+  Std_Error = std_errors,
+  Z_score = z_scores,
+  P_value = p_values
+)
+
+# View the table
+print(pval_table)
+
+# Standardize the residuals, and analyse the standardized residuals
+standardized_residuals3 <- resid(model_arimax_log3)/sqrt(model_arimax_log3$sigma2)
+qqnorm(standardized_residuals3,
+       main = "QQ plot of Standardized Residuals of ARIMAX(1,1,0)")
+qqline(standardized_residuals3)
+
+# Compute and plot Ljung-Box test p-values for lags 1 to 20
+max_log <- 20
+p_value <- numeric(max_log)
+for (lag in 1:max_log) {
+  p_value[lag] <- Box.test(standardized_residuals3, lag = lag, type = "Ljung-Box")$p.value
+}
+
+plot(1:max_log, p_value, type = "b",
+     xlab = "Lag", ylab = "p-value", 
+     main = "Ljung-Box Test p-values of Standardized Residuals of ARIMAX (2,1,1)",
+     ylim = c(0, 1))
+abline(h = 0.05, col = "blue", lty = 2)
+```
+
+Prediction ARIMAX (2,1,1)
+```{r}
+# Compute the in-sample fitted values (one-step-ahead forecasts)
+fitted_values3 <- fitted(model_arimax_log3)
+actual_values <- log_price
+# Plot the actual log series in black
+plot(log_price,
+     type = "l",
+     col = "black",
+     main = "Log Price vs. One-step Ahead Forecasts ARIMAX (2,1,1)",
+     ylab = "Log of Series")
+
+# Overlay the fitted (one-step-ahead) forecasts in red
+lines(fitted_values3,
+      col = "red",
+      lty = 2)
+
+# Legend 
+legend("topleft",
+       legend = c("Actual log_price", "One-step Ahead Fitted"),
+       col = c("black", "red"),
+       lty = c(1, 2))
+
+# Calculate residuals
+residuals <- actual_values - fitted_values3
+
+# Compute RMSE
+RMSE <- sqrt(mean(residuals^2))
+print(paste("RMSE:", RMSE))
+
+# Compute pseudo-R^2:
+# SST is the total sum of squares: sum((actual - mean(actual))^2)
+SST <- sum((actual_values - mean(actual_values))^2)
+# SSE is the sum of squared errors: sum(residuals^2)
+SSE <- sum(residuals^2)
+R2 <- 1 - (SSE / SST)
+print(paste("Pseudo R^2:", R2))
+
+```
+
+
+Compare AIC of the candidate models: we pick ARIMAX(2,1,1)
+```{r}
+# Display AIC for the fitted ARIMAX model
+aic_value1 <- AIC(model_arimax_log1)
+aic_value2 <- AIC(model_arimax_log2)
+aic_value3 <- AIC(model_arimax_log3)
+
+print(paste("AIC_110:", aic_value1))
+print(paste("AIC_111:", aic_value2))
+print(paste("AIC_211:", aic_value3))
+
+```
+
+
+
+```{r}
+#install.packages("timeSeries")
+#install.packages(c("timeDate", "timeSeries", "fBasics"))
+#install.packages("fGarch")
+#install.packages("rugarch")
+
+library("astsa")
+library("timeSeries")
+library("fGarch")
+library(tseries)
+library(xts)
+library(rugarch)
+```
+
+returns (from prof code)
+```{r}
+library(rugarch)
+library(xts)    # optional if you're working with time-series objects
+
+
+# Prepare data (growth rate / returns)
+log_returns <- diff(log(daily_avg_df$avg_Price))
+
+# Plot Returns
+plot(log_returns, 
+     type = "l", 
+     main = "Log Returns of Cocoa Prices", 
+     ylab = "Log Return")
+
+# Step 3: ACF/PACF Returns
+acf2(log_returns, 24, main = "ACF/PACF of Log Returns")
+```
+
+
+Fit MODELS
+```{r}
+
+X <- as.matrix(daily_avg_df %>% select(avg_PRCP, avg_TAVG))
+# Check dimensions: they should match the length of your time series data
+dim(X)
+
+
+# Define your ARIMAX + GARCH specification
+spec <- ugarchspec(
+  variance.model = list(
+    model = "sGARCH",        # standard GARCH model
+    garchOrder = c(5, 1),
+    external.regressors = NULL  # Optionally include regressors in variance
+  ),
+  mean.model = list(
+    armaOrder = c(2, 1),       # ARMA order; adjust as needed
+    include.mean = TRUE,
+    external.regressors = X    # X is your regressor matrix for ARIMAX
+  ),
+  distribution.model = "norm"  # or "std" for Student's t-distribution, etc.
+)
+
+# Fit the model to your data (assume Y is your time series data)
+GXmodel <- ugarchfit(spec, data = log_returns)
+
+# To view the results:
+# Get a detailed summary including coefficient significance:
+# Extract the fitted model’s coefficient matrix
+fit_coefs <- GXmodel@fit$matcoef
+
+# Print it
+fit_coefs
+# Extract information criteria (like AIC) separately:
+info <- infocriteria(GXmodel)
+print(info)
+
+summary(GXmodel)
+```
+
+Residual analysis of GXmodel (ARIMAX, GARCH)
+```{r}
+#ACF/PACF of GARCH
+resdGXmodel = residuals(GXmodel)
+
+plot(main = "ARMAX(2,1) + GARCH(5,1) residual",
+     type = "l", 
+     resdGXmodel)
+
+acf2(resdGXmodel^2, main = "ACF/PACF of Residuals of ARMAX(2,1) + GARCH(5,1)")
+
+# QQ-Plot of GARCH
+GX_stnd_residuals <- residuals(GXmodel, standardize = TRUE)
+
+qqnorm(GX_stnd_residuals,
+       main = "QQ plot of Standardized Residuals of ARMAX(2,1) + GARCH(5,1)")
+qqline(GX_stnd_residuals) # Deviation is noticeable but violation insignificant
+
+
+# Compute and plot Ljung-Box test p-values for lags 1 to 20
+max_log <- 20
+p_value <- numeric(max_log)
+for (lag in 1:max_log) {
+  p_value[lag] <- Box.test(GX_stnd_residuals, lag = lag, type = "Ljung-Box")$p.value
+}
+
+plot(1:max_log, p_value, type = "b",
+     xlab = "Lag", ylab = "p-value", 
+     main = "Ljung-Box Test p-values of Standardized Residuals of ARMAX(2,1) + GARCH(5,1)", cex.main = 1,
+     ylim = c(0, 1))
+abline(h = 0.05, col = "blue", lty = 2)
+```
+
+
+
+Prediction for GXmodel
+```{r}
+#forecast_obj <- ugarchforecast(GXmodel, n.ahead = 4)
+#plot(forecast_obj)
+
+# Extract actual log returns and fitted values from the model
+fitted_valuesGX <- fitted(GXmodel)
+actual_values <- daily_avg_df$avg_Price[-1]
+
+log_vals <- log(actual_values) 
+original_predictionGX = exp(fitted_valuesGX + log_vals)
+
+# Extract actual price data (original scale)
+n_data <- length(actual_values)
+
+# PLOT: actual data in black, predicted in red
+plot(
+  1:n_data,               # x-axis indices
+  actual_values,          # y values
+  type = "l",
+  col = "black",
+  main = "Actual Prices vs. Four-step Ahead Fitted ARMAX(2,1) + GARCH(5,1) (Original Scale)", cex.main = 1,
+  xlab = "Index",
+  ylab = "Price"
+)
+
+lines(
+  1:n_data,                # same x indices
+  original_predictionGX,        # fitted values on original scale
+  col = "red",
+  lty = 2
+)
+
+legend(
+  "topleft",
+  legend = c("Actual Price", "Four-step Ahead Fitted"),
+  col = c("black", "red"),
+  lty = c(1, 2),
+  bty = "n"
+)
+
+# Compute RMSE
+rmse <- sqrt(mean((log_returns - fitted_valuesGX)^2))
+cat("RMSE:", rmse, "\n")
+
+# Compute R² (pseudo R² for the mean equation)
+ss_res <- sum((log_returns - fitted_valuesGX)^2)
+ss_tot <- sum((log_returns - mean(log_returns))^2)
+r_squared <- 1 - (ss_res / ss_tot)
+cat("R²:", r_squared, "\n")
+
+
+
+# Compute RMSE for original prices
+rmse_prices <- sqrt(mean((actual_values - original_predictionGX)^2))
+cat("RMSE for Original Prices of ARMAX(2,1) + GARCH(5,1):", rmse_prices, "\n")
+
+# Compute R² for original prices:
+ss_res_prices <- sum((actual_values - original_predictionGX)^2)
+ss_tot_prices <- sum((actual_values - mean(actual_values))^2)
+r2_prices <- 1 - ss_res_prices / ss_tot_prices
+cat("R² for Original Prices of ARMAX(2,1) + GARCH(5,1):", r2_prices, "\n")
+
+
+```
+
+
+
+
+
+FIT MODEL GARCH
+```{r}
+#Fit GARCH model
+#Gmodel1 <- garchFit(~arma(0, 0) + garch(1, 0), data = log_returns, trace = FALSE) #ARCH(1) 
+Gmodel2 <- garchFit(~arma(2, 1) + garch(10, 1), data = log_returns, trace = FALSE) #GARCH(1,1)
+
+
+#summary(Gmodel1)
+summary(Gmodel2)
+#summary(Gmodel3)
+```
+
+GARCH resdiual analysis
+```{r}
+
+#ACF/PACF of GARCH
+resdGmodel2 = residuals(Gmodel2)
+
+plot(main = "ARMAX(2,1) + GARCH(10,1) residual",
+     type = "l", 
+     resdGmodel2)
+
+acf2(resdGmodel2^2, main = "ACF/PACF of Residuals of ARMAX(2,1) + GARCH(10,1)")
+
+# QQ-Plot of GARCH
+GARCH_stnd_residuals <- resdGmodel2/sqrt(Gmodel2@h.t)
+qqnorm(GARCH_stnd_residuals,
+       main = "QQ plot of Standardized Residuals of ARMAX(2,1) + GARCH(10,1)", cex.main = 1)
+qqline(GARCH_stnd_residuals) # Deviation is noticeable but violation insignificant
+
+
+# Compute and plot Ljung-Box test p-values for lags 1 to 20
+max_log <- 20
+p_value <- numeric(max_log)
+for (lag in 1:max_log) {
+  p_value[lag] <- Box.test(GARCH_stnd_residuals, lag = lag, type = "Ljung-Box")$p.value
+}
+
+plot(1:max_log, p_value, type = "b",
+     xlab = "Lag", ylab = "p-value", 
+     main = "Ljung-Box Test p-values of Standardized Residuals of ARMAX(2,1) + GARCH(10,1)", cex.main = 1,
+     ylim = c(0, 1))
+abline(h = 0.05, col = "blue", lty = 2)
+```
+GARCH prediction
+```{r}
+predict(Gmodel2, n.ahead = 4, plot = TRUE)
+
+
+# Extract actual log returns and fitted values from the model
+fitted_vals <- fitted(Gmodel2)
+actual_valsG <- log_returns
+log_vals <- log(actual_values) 
+original_prediction = exp(fitted_vals + log_vals)
+
+
+# Extract actual price data (original scale)
+n_data <- length(actual_values)
+
+# PLOT: actual data in black, predicted in red
+plot(
+  1:n_data,               # x-axis indices
+  actual_values,          # y values
+  type = "l",
+  col = "black",
+  main = "Actual Prices vs. Four-step Ahead Fitted ARMAX(2,1) + GARCH(10,1) (Original Scale)", cex.main = 1,
+  xlab = "Index",
+  ylab = "Price"
+)
+
+lines(
+  1:n_data,                # same x indices
+  original_prediction,        # fitted values on original scale
+  col = "red",
+  lty = 2
+)
+
+legend(
+  "topleft",
+  legend = c("Actual Price", "Four-step Ahead Fitted"),
+  col = c("black", "red"),
+  lty = c(1, 2),
+  bty = "n"
+)
+
+# Compute RMSE
+rmse <- sqrt(mean((actual_valsG - fitted_vals)^2))
+cat("RMSE:", rmse, "\n")
+
+# Compute R² (pseudo R² for the mean equation)
+ss_res <- sum((actual_valsG - fitted_vals)^2)
+ss_tot <- sum((actual_valsG - mean(actual_valsG))^2)
+r_squared <- 1 - (ss_res / ss_tot)
+cat("R²:", r_squared, "\n")
+
+#Reconvert Forecasted Returns to Original Series
+# Get the last observed log price from your original data
+last_log_price <- tail(log(daily_avg_df$avg_Price), 1)
+
+# Compute cumulative sum of the forecasted returns to get the forecasted log prices
+predicted_log_prices <- last_log_price + cumsum(fitted_vals)
+
+# Convert forecasted log prices back to original price scale
+predicted_prices <- exp(predicted_log_prices)
+
+
+# Compute RMSE for original prices
+rmse_prices <- sqrt(mean((actual_values - original_prediction)^2))
+cat("RMSE for Original Prices:", rmse_prices, "\n")
+
+# Compute R² for original prices:
+ss_res_prices <- sum((actual_values - original_prediction)^2)
+ss_tot_prices <- sum((actual_values - mean(actual_values))^2)
+r2_prices <- 1 - ss_res_prices / ss_tot_prices
+cat("R² for Original Prices:", r2_prices, "\n")
+
+```
+
+
+
+
+Fit MODELS ARCH(2)
+```{r}
+#Fit GARCH model
+# ARCH(1) model specification
+
+arch_spec <- ugarchspec(
+  variance.model = list(model = "sGARCH", garchOrder = c(2, 0)),
+  mean.model = list(armaOrder = c(2, 1), include.mean = TRUE),
+  distribution.model = "norm"
+)
+
+# Fit model
+arch_fit <- ugarchfit(spec = arch_spec, data = log_returns)
+show(arch_fit)
+
+# 1. Forecast 5 steps ahead (from your fitted rugarch model)
+forecast <- ugarchforecast(arch_fit, n.ahead = 5)
+
+# 2. Plot forecasted returns (mean)
+plot(forecast, which = 1)
+title("Forecasted Log Returns (Mean Equation)", line = 3)
+
+# 3. Plot forecasted volatility (sigma)
+plot(forecast, which = 3, main = "Plot for the Forecasted volatility(sigma)")
+title("Forecasted volatility (Sigma)", line = 3)
+```
+
+GARCH resdiual analysis
+```{r}
+return_fitted_vals <- fitted(arch_fit)
+rmse <- sqrt(mean((log_returns - return_fitted_vals)^2))
+cat("RMSE:", rmse, "\n")
+
+actual_values <- daily_avg_df$avg_Price[-1]
+# Compute RMSE for original prices
+log_data = log(actual_values)
+# Get starting index (skip NAs)
+# original_fitted = exp(return_fitted_vals + log_data)
+
+valid_idx <- which(!is.na(return_fitted_vals))
+aligned_log_data <- log_data[(1 + length(log_data) - length(return_fitted_vals)):length(log_data)]
+
+# Then compute original_fitted
+original_fitted <- exp(return_fitted_vals + aligned_log_data)
+
+rmse_prices <- sqrt(mean((actual_values - original_fitted)^2))
+cat("RMSE for Original Prices:", rmse_prices, "\n")
+
+# Compute R² for original prices
+ss_res_prices <- sum((actual_values - return_fitted_vals)^2)
+ss_tot_prices <- sum((actual_values - mean(actual_values))^2)
+r2_prices <- 1 - ss_res_prices / ss_tot_prices
+cat("R² for Original Prices:", r2_prices, "\n")
+
+# Gmodel1 <- garchFit(~arma(0, 0) + garch(2 ,0), data = log_returns, trace = FALSE) #ARCH(1) 
+Gmodel2 <- garchFit(~arma(2, 1) + garch(1, 1), data = log_returns, trace = FALSE) #GARCH(1,1)
+
+#summary(Gmodel1)
+summary(Gmodel2)
+#summary(Gmodel3)
+```
+
+Prediction
+```{r}
+#Step 1: Forecast 100 steps ahead ===
+forecast <- ugarchforecast(arch_fit, n.ahead = 10)
+
+# Plot forecasted conditional mean (returns)
+plot(forecast, which = 1)
+title("Time series prediction (mean)", line = 2.5)
+
+plot(forecast, which = 3)
+title("Sigma prediction (volatility)", line = 2.5)
+
+#Step 2: Residual diagnostics ===
+resd_arch <- residuals(arch_fit, standardize = FALSE)
+
+# Plot residuals
+plot(resd_arch, 
+     type = "l", 
+     main = "ARMA(2,1) + ARCH(1) Residuals", 
+     ylab = "Residuals")
+
+# ACF/PACF of squared residuals
+acf2(resd_arch^2, main = "ACF/PACF of Squared Residuals of ARMA(2,1) + ARCH(1)")
+
+#Step 3: QQ-plot of standardized residuals ===
+std_resid <- residuals(arch_fit, standardize = TRUE)
+
+qqnorm(std_resid, 
+       main = "QQ Plot of Standardized Residuals of ARMA(2,1) + ARCH(1)")
+qqline(std_resid)
+
+#Step 4: Ljung-Box p-values for lags 1 to 20 ===
+max_lag <- 20
+p_values <- numeric(max_lag)
+
+for (lag in 1:max_lag) {
+  p_values[lag] <- Box.test(std_resid, lag = lag, type = "Ljung-Box")$p.value
+}
+
+plot(1:max_lag, p_values, type = "b",
+     xlab = "Lag", ylab = "p-value", 
+     main = "Ljung-Box Test p-values of Standardized Residuals of ARMA(2,1) + ARCH(1)", cex.main = 1,
+     ylim = c(0, 1))
+abline(h = 0.05, col = "blue", lty = 2)
+```
+
+Fit model with regressor
+```{r}
+# Step 1: Prepare regressors (remove first row to match diff length)
+xreg <- as.matrix(daily_avg_df[-1, c("avg_PRCP", "avg_TAVG")])
+
+# Step 2: Specify the GARCH model with regressors
+arch_spec_reg <- ugarchspec(
+  variance.model = list(model = "sGARCH", garchOrder = c(15, 0)),
+  mean.model = list(armaOrder = c(2, 1), include.mean = TRUE,
+                    external.regressors = xreg),
+  distribution.model = "norm"
+)
+
+# Step 3: Fit the model
+arch_fit_reg <- ugarchfit(spec = arch_spec_reg, data = log_returns)
+show(arch_fit_reg)
+
+# Step 4: Forecast 5 steps ahead
+forecast_reg <- ugarchforecast(arch_fit_reg, n.ahead = 5)
+
+# Step 5: Plot mean forecast
+plot(forecast_reg, which = 1)
+title("Mean forecast Regressor", line = 3)
+# Step 6: Plot volatility forecast
+plot(forecast_reg, which = 3)
+title("Volatility forecast (Regressor)", line = 3)
+
+# Print
+fit_coefs <- arch_fit_reg@fit$matcoef
+
+fit_coefs
+
+info <- infocriteria(arch_fit_reg)
+
+print(info)
+```
+
+Residual analysis with regressor
+```{r}
+# Step 1: Extract fitted log returns
+return_fitted_vals_reg <- fitted(arch_fit_reg)
+return_fitted_vals_reg <- na.omit(return_fitted_vals_reg)  # Remove potential NA at start
+
+# Step 2: Compute RMSE in log-return space
+log_returns_aligned_reg <- tail(log_returns, length(return_fitted_vals_reg))
+rmse_reg <- sqrt(mean((log_returns_aligned_reg - return_fitted_vals_reg)^2))
+cat("RMSE_reg (Log-Returns):", rmse_reg, "\n")
+
+# Step 3: Reconstruct predicted prices
+log_price_data_reg <- log(daily_avg_df$avg_Price)
+log_price_aligned_reg <- tail(log_price_data_reg, length(return_fitted_vals_reg))
+actual_prices_reg <- exp(log_price_aligned_reg)
+original_fitted_reg <- exp(return_fitted_vals_reg + log_price_aligned_reg)
+
+# Step 4: Compute RMSE and R² in original price scale
+rmse_prices_reg <- sqrt(mean((actual_prices_reg - original_fitted_reg)^2))
+cat("RMSE_reg (Original Prices):", rmse_prices_reg, "\n")
+
+ss_res_prices_reg <- sum((actual_prices_reg - original_fitted_reg)^2)
+ss_tot_prices_reg <- sum((actual_prices_reg - mean(actual_prices_reg))^2)
+r2_prices_reg <- 1 - ss_res_prices_reg / ss_tot_prices_reg
+cat("R²_reg (Original Prices):", r2_prices_reg, "\n")
+```
+
+Prediction with regressor
+```{r}
+# Regressors for in-sample fit (must align with log_returns)
+xreg_in_reg <- as.matrix(daily_avg_df[-1, c("avg_PRCP", "avg_TAVG")])
+xreg_in_reg <- na.omit(xreg_in_reg)
+
+# Regressors for forecast (last row repeated for 10-step forecast)
+xreg_forecast <- matrix(rep(t(tail(xreg_in_reg, 1)), 10), ncol = 2, byrow = TRUE)
+
+# === Step 2: Forecast 10 steps ahead ===
+forecast_reg10 <- ugarchforecast(arch_fit_reg, 
+                           n.ahead = 10, 
+                           external.forecasts = list(mregfor = xreg_forecast))
+
+# Plot forecasted conditional mean (returns)
+plot(forecast_reg10, which = 1)
+title("Forecasted conditional mean (returns) with regressor", line = 3)
+
+# Plot forecasted conditional volatility (sigma)
+plot(forecast_reg10, which = 3)
+title("Forecasted conditional volatility (sigma) with regressor", line = 3)
+
+# === Step 3: Residual diagnostics ===
+resd_arch <- residuals(arch_fit_reg, standardize = FALSE)
+
+plot(resd_arch, 
+     type = "l", 
+     main = "ARMA(2,1) + ARCH(1) Residuals with regressor", 
+     ylab = "Residuals")
+
+acf2(resd_arch^2, main = "ACF/PACF of Squared Residuals with regressor")
+
+# === Step 4: QQ-plot of standardized residuals ===
+std_resid_reg <- residuals(arch_fit_reg, standardize = TRUE)
+
+qqnorm(std_resid_reg, 
+       main = "QQ Plot of Standardized Residuals with regressor")
+qqline(std_resid_reg)
+
+# === Step 5: Ljung-Box test for lags 1 to 20 ===
+max_lag_reg <- 20
+p_values_reg <- numeric(max_lag_reg)
+
+for (lag in 1:max_lag) {
+  p_values[lag] <- Box.test(std_resid_reg, lag = lag, type = "Ljung-Box")$p.value
+}
+
+plot(1:max_lag, p_values_reg, type = "b",
+     xlab = "Lag", ylab = "p-value", 
+     main = "Ljung-Box Test p-values of Standardized Residuals with regressor",
+     ylim = c(0, 1))
+abline(h = 0.05, col = "blue", lty = 2)
+```
+
+```{r}
+# Extract actual price data (original scale)
+original_prediction <- fitted(arch_fit)
+n_data <- length(actual_values)
+
+# plot: actual data in black, predicted in red
+plot(
+  1:n_data,
+  actual_values,
+  type = "l",
+  col = "black",
+  main = "Actual Prices vs. One-step Ahead Fitted (Original Scale)",
+  xlab = "Index",
+  ylab = "Price"
+)
+
+lines(
+  1:n_data,
+  original_prediction,
+  col = "red",
+  lty = 2
+)
+
+legend(
+  "topleft",
+  legend = c("Actual Price", "One-step Ahead Fitted"),
+  col = c("black", "red"),
+  lty = c(1, 2),
+  bty = "n"
+)
+```
