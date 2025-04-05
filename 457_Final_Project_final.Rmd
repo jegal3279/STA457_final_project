@@ -605,12 +605,26 @@ abline(h = 0.05, col = "blue", lty = 2)
 
 Prediction for GXmodel
 ```{r}
-#forecast_obj <- ugarchforecast(GXmodel, n.ahead = 4)
+forecast_obj <- ugarchforecast(GXmodel, n.ahead = 4)
 #plot(forecast_obj)
 
 # Extract actual log returns and fitted values from the model
 fitted_valuesGX <- fitted(GXmodel)
 actual_values <- daily_avg_df$avg_Price[-1]
+last_four <- tail(actual_values, 4)
+
+predictedGX <- exp(log(last_four) + forecast_obj@forecast$seriesFor)
+
+print(predictedGX)
+
+# Extract forecast sigma (volatility) on the log scale; this acts as the standard error for the forecasted log returns.
+std_errors_log <- forecast_obj@forecast$sigmaFor
+
+# Calculate standard errors on the original scale using the delta method.
+# If Y = exp(X) then SE(Y) ≈ exp(X) * SE(X)
+std_errors_orig <- predictedGX * std_errors_log
+
+print(std_errors_orig)
 
 log_vals <- log(actual_values) 
 original_predictionGX = exp(fitted_valuesGX + log_vals)
@@ -626,12 +640,20 @@ plot(
   col = "black",
   main = "Actual Prices vs. Four-step Ahead Fitted ARMAX(2,1) + GARCH(5,1) (Original Scale)", cex.main = 1,
   xlab = "Index",
-  ylab = "Price"
+  ylab = "Price",
+  xlim = c(1, n_data + 5)
 )
 
 lines(
   1:n_data,                # same x indices
   original_predictionGX,        # fitted values on original scale
+  col = "red",
+  lty = 2
+)
+
+lines(
+  n_data:n_data+3,                # same x indices
+  predictedGX,        # fitted values on original scale
   col = "red",
   lty = 2
 )
@@ -691,16 +713,16 @@ GARCH resdiual analysis
 #ACF/PACF of GARCH
 resdGmodel2 = residuals(Gmodel2)
 
-plot(main = "ARMAX(2,1) + GARCH(10,1) residual",
+plot(main = "ARMA(2,1) + GARCH(10,1) residual",
      type = "l", 
      resdGmodel2)
 
-acf2(resdGmodel2^2, main = "ACF/PACF of Residuals of ARMAX(2,1) + GARCH(10,1)")
+acf2(resdGmodel2^2, main = "ACF/PACF of Residuals of ARMA(2,1) + GARCH(10,1)")
 
 # QQ-Plot of GARCH
 GARCH_stnd_residuals <- resdGmodel2/sqrt(Gmodel2@h.t)
 qqnorm(GARCH_stnd_residuals,
-       main = "QQ plot of Standardized Residuals of ARMAX(2,1) + GARCH(10,1)", cex.main = 1)
+       main = "QQ plot of Standardized Residuals of ARMA(2,1) + GARCH(10,1)", cex.main = 1)
 qqline(GARCH_stnd_residuals) # Deviation is noticeable but violation insignificant
 
 
@@ -713,7 +735,7 @@ for (lag in 1:max_log) {
 
 plot(1:max_log, p_value, type = "b",
      xlab = "Lag", ylab = "p-value", 
-     main = "Ljung-Box Test p-values of Standardized Residuals of ARMAX(2,1) + GARCH(10,1)", cex.main = 1,
+     main = "Ljung-Box Test p-values of Standardized Residuals of ARMA(2,1) + GARCH(10,1)", cex.main = 1,
      ylim = c(0, 1))
 abline(h = 0.05, col = "blue", lty = 2)
 ```
@@ -738,9 +760,10 @@ plot(
   actual_values,          # y values
   type = "l",
   col = "black",
-  main = "Actual Prices vs. Four-step Ahead Fitted ARMAX(2,1) + GARCH(10,1) (Original Scale)", cex.main = 1,
+  main = "Actual Prices vs. Four-step Ahead Fitted ARMA(2,1) + GARCH(10,1) (Original Scale)", cex.main = 1,
   xlab = "Index",
-  ylab = "Price"
+  ylab = "Price",
+  xlim = c(1, n_data + 5) 
 )
 
 lines(
@@ -874,17 +897,17 @@ resd_arch <- residuals(arch_fit, standardize = FALSE)
 # Plot residuals
 plot(resd_arch, 
      type = "l", 
-     main = "ARMA(2,1) + ARCH(1) Residuals", 
+     main = "ARMA(2,1) + GARCH(2,0) Residuals", 
      ylab = "Residuals")
 
 # ACF/PACF of squared residuals
-acf2(resd_arch^2, main = "ACF/PACF of Squared Residuals of ARMA(2,1) + ARCH(1)")
+acf2(resd_arch^2, main = "ACF/PACF of Squared Residuals of ARMA(2,1) + GARCH(2,0)")
 
 #Step 3: QQ-plot of standardized residuals ===
 std_resid <- residuals(arch_fit, standardize = TRUE)
 
 qqnorm(std_resid, 
-       main = "QQ Plot of Standardized Residuals of ARMA(2,1) + ARCH(1)")
+       main = "QQ Plot of Standardized Residuals of ARMA(2,1) + GARCH(2,0)")
 qqline(std_resid)
 
 #Step 4: Ljung-Box p-values for lags 1 to 20 ===
@@ -897,7 +920,7 @@ for (lag in 1:max_lag) {
 
 plot(1:max_lag, p_values, type = "b",
      xlab = "Lag", ylab = "p-value", 
-     main = "Ljung-Box Test p-values of Standardized Residuals of ARMA(2,1) + ARCH(1)", cex.main = 1,
+     main = "Ljung-Box Test p-values of Standardized Residuals of ARMA(2,1) + GARCH(2,0)", cex.main = 1,
      ylim = c(0, 1))
 abline(h = 0.05, col = "blue", lty = 2)
 ```
@@ -938,6 +961,47 @@ info <- infocriteria(arch_fit_reg)
 
 print(info)
 ```
+
+ARMA(2,1) + GARCH(2,0) Prediction
+
+```{r}
+# Extract actual log returns and fitted values from the model
+fitted_valsA <- fitted(arch_fit)
+actual_valsG <- log_returns
+log_vals <- log(actual_values) 
+original_predictionA = exp(fitted_valsA + log_vals)
+
+
+# Extract actual price data (original scale)
+n_data <- length(actual_values)
+
+# PLOT: actual data in black, predicted in red
+plot(
+  1:n_data,               # x-axis indices
+  actual_values,          # y values
+  type = "l",
+  col = "black",
+  main = "Actual Prices vs. Four-step Ahead Fitted ARMA(2,1) + GARCH(2,0) (Original Scale)", cex.main = 1,
+  xlab = "Index",
+  ylab = "Price"
+)
+
+lines(
+  1:n_data,                # same x indices
+  original_predictionA,        # fitted values on original scale
+  col = "red",
+  lty = 2
+)
+
+legend(
+  "topleft",
+  legend = c("Actual Price", "Four-step Ahead Fitted"),
+  col = c("black", "red"),
+  lty = c(1, 2),
+  bty = "n"
+)
+```
+
 
 Residual analysis with regressor
 ```{r}
@@ -993,16 +1057,16 @@ resd_arch <- residuals(arch_fit_reg, standardize = FALSE)
 
 plot(resd_arch, 
      type = "l", 
-     main = "ARMA(2,1) + ARCH(1) Residuals with regressor", 
+     main = "ARMAX(2,1) + GARCH(15,0) Residuals", 
      ylab = "Residuals")
 
-acf2(resd_arch^2, main = "ACF/PACF of Squared Residuals with regressor")
+acf2(resd_arch^2, main = "ACF/PACF of Squared Residuals of ARMAX(2,1) + GARCH(15,0)")
 
 # === Step 4: QQ-plot of standardized residuals ===
 std_resid_reg <- residuals(arch_fit_reg, standardize = TRUE)
 
 qqnorm(std_resid_reg, 
-       main = "QQ Plot of Standardized Residuals with regressor")
+       main = "QQ Plot of Standardized Residuals of ARMAX(2,1) + GARCH(15,0)")
 qqline(std_resid_reg)
 
 # === Step 5: Ljung-Box test for lags 1 to 20 ===
@@ -1015,37 +1079,64 @@ for (lag in 1:max_lag) {
 
 plot(1:max_lag, p_values_reg, type = "b",
      xlab = "Lag", ylab = "p-value", 
-     main = "Ljung-Box Test p-values of Standardized Residuals with regressor",
+     main = "Ljung-Box Test p-values of Standardized Residuals of ARMAX(2,1) + GARCH(15,0)", cex.main=1.0,
      ylim = c(0, 1))
 abline(h = 0.05, col = "blue", lty = 2)
 ```
 
 ```{r}
+# Extract the mean forecast
+mean_forecast <- fitted(forecast)
+
+# Extract forecasted sigma (volatility)
+vol_forecast <- sigma(forecast)
+
+# Suppose your original series was:
+original_series <- fitted(arch_fit)  # or the original returns series you modeled
+
+# Combine as a time series (xts or zoo is helpful here)
+library(xts)
+
+# Suppose your original_series is an xts object with a proper time index.
+last_date <- index(original_series)[length(original_series)]
+# Create a sequence of future dates; adjust the 'by' argument as needed (e.g., "days", "weeks")
+future_dates <- seq(from = last_date + 1, by = "days", length.out = length(mean_forecast))
+# Create the xts object for the forecast
+forecast_xts <- xts(mean_forecast, order.by = future_dates)
+# Combine original series with forecasted values
+combinedAR <- c(original_series, forecast_xts)
+combinedAR_og <- exp(combinedAR)
+
+# Extract actual log returns and fitted values from the model
+fitted_valsAR <- fitted(arch_fit_reg)
+actual_valsG <- log_returns
+log_vals <- log(actual_values) 
+original_predictionAR = exp(fitted_valsAR + log_vals)
+
 # Extract actual price data (original scale)
-original_prediction <- fitted(arch_fit)
 n_data <- length(actual_values)
 
-# plot: actual data in black, predicted in red
+# PLOT: actual data in black, predicted in red
 plot(
-  1:n_data,
-  actual_values,
+  1:n_data,               # x-axis indices
+  actual_values,          # y values
   type = "l",
   col = "black",
-  main = "Actual Prices vs. One-step Ahead Fitted (Original Scale)",
+  main = "Actual Prices vs. Four-step Ahead Fitted ARMAX(2,1) + GARCH(15,0) (Original Scale)", cex.main = 1,
   xlab = "Index",
   ylab = "Price"
 )
 
 lines(
-  1:n_data,
-  original_prediction,
+  1:length(combinedAR_og),                # same x indices
+  combinedAR_og,        # fitted values on original scale
   col = "red",
   lty = 2
 )
 
 legend(
   "topleft",
-  legend = c("Actual Price", "One-step Ahead Fitted"),
+  legend = c("Actual Price", "Four-step Ahead Fitted"),
   col = c("black", "red"),
   lty = c(1, 2),
   bty = "n"
