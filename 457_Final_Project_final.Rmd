@@ -3,6 +3,8 @@ title: "457finalproject"
 output: html_document
 ---
 
+Group members: Sung Jegal, Minseo Kim, Paul Hwang
+
 ```{r}
 library(dplyr)
 
@@ -651,12 +653,12 @@ lines(
   lty = 2
 )
 
-lines(
-  n_data:n_data+3,                # same x indices
-  predictedGX,        # fitted values on original scale
-  col = "red",
-  lty = 2
-)
+#lines(
+#  n_data:n_data+3,                # same x indices
+#  predictedGX,        # fitted values on original scale
+#  col = "red",
+#  lty = 2
+#)
 
 legend(
   "topleft",
